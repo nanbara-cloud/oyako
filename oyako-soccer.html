@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>親子サッカー 組み合わせ作成</title>
+<style>
+  :root{
+    --bg:#f5f5f4; --panel:#ffffff; --line:#dedddb; --line2:#ececeb;
+    --ink:#333331; --ink2:#6f6e6b; --head:#e7e7e5;
+    --oya:#eef2ee; --oyaLine:#9fb3a4; --lunch:#f0ece3; --blank:#fafafa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Meiryo","メイリオ",sans-serif;font-size:14px;line-height:1.6}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:20px;font-weight:700;margin:0 0 4px;letter-spacing:.02em}
+  .sub{color:var(--ink2);font-size:12.5px;margin:0 0 22px}
+  .cols{display:grid;grid-template-columns:300px 1fr;gap:22px;align-items:start}
+  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);padding:16px 16px 18px}
+  .panel h2{font-size:13px;margin:0 0 12px;font-weight:700;color:var(--ink2)}
+  .fld{display:flex;justify-content:space-between;align-items:center;gap:10px;
+       padding:5px 0;border-bottom:1px solid var(--line2)}
+  .fld:last-child{border-bottom:0}
+  .fld label{font-size:12.5px;color:var(--ink)}
+  .fld input{width:84px;padding:4px 6px;border:1px solid var(--line);background:#fffdf3;
+             font-family:inherit;font-size:13px;text-align:center;color:var(--ink)}
+  .grades{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:4px}
+  .grades div{text-align:center}
+  .grades span{display:block;font-size:11.5px;color:var(--ink2);margin-bottom:3px}
+  .grades input{width:100%;padding:4px;border:1px solid var(--line);background:#fffdf3;
+                text-align:center;font-family:inherit;font-size:13px}
+  .btns{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  button{font-family:inherit;font-size:13px;padding:8px 14px;border:1px solid #8d8c88;
+         background:#4a4a47;color:#fff;cursor:pointer}
+  button.ghost{background:#fff;color:var(--ink)}
+  button:hover{opacity:.88}
+  table{border-collapse:collapse;width:100%;background:var(--panel);font-size:13px}
+  th,td{border:1px solid var(--line);padding:6px 4px;text-align:center}
+  thead th{background:var(--head);font-weight:700;font-size:12.5px}
+  td.time{background:#f7f7f6;white-space:nowrap;font-weight:700;width:118px}
+  td.vs{width:22px;color:var(--ink2)}
+  tr.lunch td{background:var(--lunch);font-weight:700}
+  tr.close td{background:#f2f2f1;font-weight:700}
+  td.oya{background:var(--oya);box-shadow:inset 0 0 0 1px var(--oyaLine)}
+  td.none{background:var(--blank);color:#bdbcb9}
+  .meta{display:flex;gap:18px;flex-wrap:wrap;margin:14px 0 10px;font-size:12.5px;color:var(--ink2)}
+  .counts{margin-top:18px;font-size:12.5px}
+  .counts table{width:auto}
+  .counts td,.counts th{padding:4px 12px}
+  .msg{margin-top:12px;padding:10px 12px;border-left:3px solid #a8a7a3;background:#fff;font-size:12.5px}
+  .msg.bad{border-left-color:#a86b5b}
+  @media print{
+    body{background:#fff}
+    .panel.settings,.btns,.sub{display:none}
+    .cols{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>親子サッカー 組み合わせ作成</h1>
+  <p class="sub">条件を入れて「組み合わせを作る」を押すと、時間割と対戦カードをまとめて作り直します。</p>
+
+  <div class="cols">
+    <div class="panel settings">
+      <h2>時間</h2>
+      <div class="fld"><label>開始時刻</label><input id="start" value="8:30"></div>
+      <div class="fld"><label>終了時刻</label><input id="end" value="14:00"></div>
+      <div class="fld"><label>1試合（分）</label><input id="dur" value="20"></div>
+      <div class="fld"><label>試合間の休憩（分）</label><input id="brk" value="5"></div>
+      <div class="fld"><label>昼休憩（分）</label><input id="lunch" value="20"></div>
+      <div class="fld"><label>昼休憩を入れる時刻</label><input id="lunchAt" value="11:00"></div>
+      <div class="fld"><label>締めの試合（分）</label><input id="close" value="40"></div>
+      <div class="fld"><label>父母戦の開始時刻</label><input id="oyaFrom" value="9:00"></div>
+
+      <h2 style="margin-top:18px">学年別のチーム数</h2>
+      <div class="grades">
+        <div><span>6年</span><input id="g6" value="1"></div>
+        <div><span>5年</span><input id="g5" value="1"></div>
+        <div><span>4年</span><input id="g4" value="2"></div>
+        <div><span>3年</span><input id="g3" value="2"></div>
+        <div><span>2年</span><input id="g2" value="2"></div>
+        <div><span>1年</span><input id="g1" value="1"></div>
+      </div>
+
+      <h2 style="margin-top:18px">コート割</h2>
+      <div class="fld"><label>A・Bコートは何年生以上</label><input id="abFrom" value="3"></div>
+      <div class="fld"><label>父母の同時試合数</label><input id="oyaPar" value="2"></div>
+
+      <div class="btns">
+        <button onclick="run()">組み合わせを作る</button>
+        <button class="ghost" onclick="again()">別の組み合わせ</button>
+        <button class="ghost" onclick="copyTsv()">Excelにコピー</button>
+        <button class="ghost" onclick="print()">印刷</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="meta" id="meta"></div>
+      <div id="out"></div>
+      <div id="msg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- 補助 ---------- */
+const toMin = s => { const m = String(s).trim().match(/^(\d{1,2})[:：](\d{1,2})$/);
+  return m ? (+m[1])*60 + (+m[2]) : NaN; };
+const toHM = v => Math.floor(v/60) + ":" + String(v%60).padStart(2,"0");
+const num = id => parseInt(document.getElementById(id).value, 10);
+const val = id => document.getElementById(id).value;
+const key = (a,b) => [a,b].sort().join("|");
+let seed = 1;
+function rnd(){ seed = (seed*1103515245 + 12345) & 0x7fffffff; return seed/0x7fffffff; }
+const shuffle = a => { for(let i=a.length-1;i>0;i--){ const j=Math.floor(rnd()*(i+1));
+  [a[i],a[j]]=[a[j],a[i]]; } return a; };
+
+/* ---------- チーム作成 ---------- */
+function makeTeams(){
+  const out = [];
+  for(let g=6; g>=1; g--){
+    const n = num("g"+g) || 0;
+    if(n === 1) out.push({name:g+"年生", grade:g});
+    else for(let i=0;i<n;i++) out.push({name:g+"年生"+"ABCD"[i], grade:g});
+  }
+  return out;
+}
+
+/* ---------- 時間割 ---------- */
+function buildSlots(){
+  const start=toMin(val("start")), end=toMin(val("end")), dur=num("dur"),
+        brk=num("brk"), lunch=num("lunch"), close=num("close"),
+        lunchAt=toMin(val("lunchAt"));
+  const avail = end - start;
+  const R = Math.floor((avail - lunch - close + brk) / (dur + brk));
+  if(!(R>0)) return null;
+  // 昼休憩を入れる位置＝指定時刻を過ぎる直前の試合の後
+  let after = R;
+  let t = start;
+  for(let i=1;i<=R;i++){
+    if(t + dur > lunchAt){ after = Math.max(1, i-1); break; }
+    t += dur + brk;
+  }
+  after = Math.min(after, R-1);
+  const slots = []; t = start;
+  for(let i=1;i<=R;i++){
+    slots.push({no:i, start:t, end:t+dur});
+    t += dur + (i===after ? lunch : brk);
+  }
+  return {R, slots, after, closeStart:t - brk + brk, close, lunch, dur, brk,
+          closeEnd: t + close};
+}
+
+/* ---------- 対戦カードの元リスト ---------- */
+function buildPools(teams, R, oyaRounds, oyaPar){
+  const abFrom = num("abFrom");
+  const high = teams.filter(t => t.grade >= abFrom);
+  const low  = teams.filter(t => t.grade <  abFrom);
+  const hasC = low.length > 0;
+  const abSlots = hasC ? 2*R : 3*R;
+  const cSlots  = hasC ? R : 0;
+  const maxOya  = oyaRounds * oyaPar;
+
+  // 父母戦の本数：上のコートは各チーム2試合、下のコートは各チーム2試合を目標
+  let oyaAB = Math.min(high.length*2, Math.max(0, abSlots - Math.ceil(high.length/2)));
+  let oyaC  = hasC ? Math.min(low.length*2, Math.max(0, cSlots - Math.ceil(low.length/2))) : 0;
+  while(oyaAB + oyaC > maxOya){ if(oyaC > 0 && oyaC >= oyaAB/2) oyaC--; else oyaAB--; }
+
+  const pairs = list => {
+    const p = [];
+    for(let i=0;i<list.length;i++) for(let j=i+1;j<list.length;j++)
+      if(Math.abs(list[i].grade-list[j].grade) <= 3) p.push([list[i].name, list[j].name]);
+    p.sort((a,b)=>rnd()-.5);
+    return p;
+  };
+  const cnt = {};
+  const fill = (base, n) => {                 // 試合数が偏らないように選ぶ
+    const out = []; let used = new Set();
+    if(!base.length) return out;
+    while(out.length < n){
+      let cands = base.filter(p => !used.has(key(p[0],p[1])));
+      if(!cands.length){ used = new Set(); cands = base; }
+      cands.sort((a,b) => ((cnt[a[0]]||0)+(cnt[a[1]]||0)) - ((cnt[b[0]]||0)+(cnt[b[1]]||0))
+                           + (rnd()-.5)*0.02);
+      const p = cands[0];
+      used.add(key(p[0],p[1]));
+      out.push(p.slice());
+      cnt[p[0]] = (cnt[p[0]]||0)+1; cnt[p[1]] = (cnt[p[1]]||0)+1;
+    }
+    return out;
+  };
+  const spread = (list, n) => {               // 父母戦を各チームに散らす
+    const out = [];
+    for(let i=0;i<n;i++){
+      const l = list.slice().sort((a,b) => (cnt[a.name]||0)-(cnt[b.name]||0) + (rnd()-.5)*0.02);
+      out.push([l[0].name, "父母"]);
+      cnt[l[0].name] = (cnt[l[0].name]||0)+1;
+    }
+    return out;
+  };
+
+  const abOya = spread(high, oyaAB);
+  const abPool = abOya.concat(fill(pairs(high), abSlots - oyaAB));
+  let cBase = pairs(low);
+  if(hasC && cBase.length === 0){        // 下の学年が1チームだけのとき
+    const helper = high.slice().sort((a,b)=>a.grade-b.grade)[0];
+    cBase = [[low[0].name, helper.name]];
+  }
+  const cOya = hasC ? spread(low, oyaC) : [];
+  const cPool = hasC ? cOya.concat(fill(cBase, cSlots - oyaC)) : [];
+  return {abPool, cPool, hasC, high, low, oyaAB, oyaC, maxOya};
+}
+
+/* ---------- ラウンドに割り当て ---------- */
+function assign(slots, pools, oyaStart, oyaPar){
+  const {abPool, cPool, hasC} = pools;
+  const ab = shuffle(abPool.slice()), c = shuffle(cPool.slice());
+  const last = {}, rounds = [];
+  const perCourt = hasC ? 2 : 3;
+
+  for(let r=0;r<slots.length;r++){
+    const allowOya = slots[r].start >= oyaStart;
+    const used = new Set(); let oyaCnt = 0;
+    const take = pool => {
+      const left = slots.length - r;
+      const oyaLeft = pool.filter(m => m.includes("父母")).length;
+      const cands = pool.filter(m => {
+        if(m.some(t => t !== "父母" && used.has(t))) return false;
+        if(m.includes("父母") && (!allowOya || oyaCnt >= oyaPar)) return false;
+        return true;
+      });
+      if(!cands.length) return null;
+      cands.sort((x,y) => score(x) - score(y));
+      function score(m){
+        let s = 0;
+        if(m.includes("父母")) s -= (oyaLeft >= left ? 60 : 12);
+        for(const t of m) if(t !== "父母") s -= (r - (last[t] ?? -3)) * 3;
+        return s + rnd();
+      }
+      const m = cands[0];
+      pool.splice(pool.indexOf(m), 1);
+      m.forEach(t => { if(t !== "父母") used.add(t); });
+      if(m.includes("父母")) oyaCnt++;
+      return m;
+    };
+    const row = [];
+    if(hasC){
+      const cm = take(c);
+      for(let k=0;k<2;k++) row.push(take(ab));
+      row.push(cm);
+    } else {
+      for(let k=0;k<3;k++) row.push(take(ab));
+    }
+    if(row.some(m => m === null)) return null;
+    used.forEach(t => last[t] = r);
+    rounds.push(row);
+  }
+  return (ab.length || c.length) ? null : rounds;
+}
+
+function quality(rounds, teams){
+  let pen = 0;
+  for(const t of teams){
+    const play = rounds.map(rd => rd.some(m => m && m.includes(t.name)));
+    let run=0, mx=0; for(const p of play){ run = p?run+1:0; mx = Math.max(mx,run); }
+    pen += Math.max(0, mx-3)**2 * 5;
+    run=0; mx=0; for(const p of play){ run = p?0:run+1; mx = Math.max(mx,run); }
+    pen += Math.max(0, mx-3)**2 * 5;
+  }
+  for(let i=0;i<rounds.length-1;i++){
+    const a = new Set(rounds[i].filter(Boolean).map(m=>key(m[0],m[1])));
+    for(const m of rounds[i+1]) if(m && a.has(key(m[0],m[1]))) pen += 8;
+  }
+  return pen;
+}
+
+/* ---------- 実行 ---------- */
+let LAST = null;
+function again(){ seed = Math.floor(Math.random()*1e9)+1; run(true); }
+function run(keepSeed){
+  if(!keepSeed) seed = 20260915;
+  const msg = document.getElementById("msg");
+  msg.className = "msg"; msg.textContent = "";
+  const tt = buildSlots();
+  if(!tt){ msg.className="msg bad";
+    msg.textContent="その時間では1試合も入りません。終了時刻か1試合の時間を見直してください。"; return; }
+  const teams = makeTeams();
+  if(teams.length < 3){ msg.className="msg bad";
+    msg.textContent="チーム数が足りません。合計3チーム以上にしてください。"; return; }
+
+  const oyaStart = toMin(val("oyaFrom"));
+  const oyaPar = Math.max(1, num("oyaPar"));
+  const oyaRounds = tt.slots.filter(s => s.start >= oyaStart).length;
+  const pools = buildPools(teams, tt.R, oyaRounds, oyaPar);
+
+  let best = null, bq = Infinity;
+  for(let i=0;i<600;i++){
+    const rs = assign(tt.slots, JSON.parse(JSON.stringify(pools)), oyaStart, oyaPar);
+    if(!rs) continue;
+    const q = quality(rs, teams);
+    if(q < bq){ best = rs; bq = q; if(q === 0) break; }
+  }
+  if(!best){ msg.className="msg bad";
+    msg.textContent="この条件では組み合わせが作れませんでした。父母戦の開始時刻を早めるか、同時試合数を増やしてみてください。"; return; }
+
+  LAST = {tt, rounds:best, teams, pools};
+  render();
+  if(bq > 0) msg.textContent = "出番の間隔に少し偏りがあります。「別の組み合わせ」で作り直せます。";
+}
+
+function render(){
+  const {tt, rounds, teams, pools} = LAST;
+  const hasC = pools.hasC;
+  let h = '<table><thead><tr><th>時間</th><th colspan="3">Aコート</th>'
+        + '<th colspan="3">Bコート</th><th colspan="3">Cコート</th></tr></thead><tbody>';
+  rounds.forEach((rd, i) => {
+    const s = tt.slots[i];
+    h += `<tr><td class="time">${toHM(s.start)}～${toHM(s.end)}</td>`;
+    for(let k=0;k<3;k++){
+      const m = rd[k];
+      if(!m){ h += '<td class="none" colspan="3">－</td>'; continue; }
+      const cls = m.includes("父母") ? ' class="oya"' : '';
+      h += `<td${cls}>${m[0]}</td><td class="vs">－</td><td${cls}>${m[1]}</td>`;
+    }
+    h += "</tr>";
+    if(i+1 === tt.after){
+      h += `<tr class="lunch"><td class="time">${toHM(s.end)}～${toHM(s.end+tt.lunch)}</td>`
+         + '<td colspan="9">昼休憩　※出店でのお買い物・お昼ごはんの時間です</td></tr>';
+    }
+  });
+  const cs = tt.closeEnd - tt.close;
+  h += `<tr class="close"><td class="time">${toHM(cs)}～${toHM(tt.closeEnd)}</td>`
+     + `<td colspan="9">前半${Math.floor(tt.close/2)}分　6年生－父母　／　後半${Math.ceil(tt.close/2)}分　6年生－コーチ</td></tr>`;
+  h += "</tbody></table>";
+
+  const cnt = {};
+  rounds.forEach(rd => rd.forEach(m => { if(m) m.forEach(t => cnt[t] = (cnt[t]||0)+1); }));
+  const order = teams.map(t => t.name).concat("父母");
+  h += '<div class="counts"><table><thead><tr><th>チーム</th><th>試合数</th>'
+     + '<th>うち父母戦</th></tr></thead><tbody>';
+  order.forEach(t => {
+    const o = rounds.flat().filter(m => m && m.includes(t) &&
+              (t === "父母" || m.includes("父母"))).length;
+    h += `<tr><td>${t}</td><td>${cnt[t]||0}</td><td>${t==="父母"?"-":o}</td></tr>`;
+  });
+  h += "</tbody></table></div>";
+  document.getElementById("out").innerHTML = h;
+
+  document.getElementById("meta").innerHTML =
+    `<span>全${tt.R}試合＋締めの試合</span><span>${toHM(tt.slots[0].start)}開始 / `
+    + `${toHM(tt.closeEnd)}終了</span><span>父母戦 ${pools.oyaAB + pools.oyaC}試合</span>`
+    + `<span>${hasC ? "Cコート＝低学年" : "3コートとも混合"}</span>`;
+}
+
+function copyTsv(){
+  if(!LAST) return;
+  const {tt, rounds} = LAST;
+  const lines = [["時間","A","","","B","","","C","",""].join("\t")];
+  rounds.forEach((rd,i) => {
+    const s = tt.slots[i];
+    const cells = [`${toHM(s.start)}～${toHM(s.end)}`];
+    rd.forEach(m => m ? cells.push(m[0],"－",m[1]) : cells.push("","",""));
+    lines.push(cells.join("\t"));
+    if(i+1 === tt.after) lines.push(`${toHM(s.end)}～${toHM(s.end+tt.lunch)}\t昼休憩`);
+  });
+  const cs = tt.closeEnd - tt.close;
+  lines.push(`${toHM(cs)}～${toHM(tt.closeEnd)}\t前半 6年生－父母 ／ 後半 6年生－コーチ`);
+  navigator.clipboard.writeText(lines.join("\n")).then(() => {
+    const m = document.getElementById("msg");
+    m.className = "msg"; m.textContent = "コピーしました。Excelのセルを選んで貼り付けてください。";
+  });
+}
+
+run();
+</script>
+</body>
+</html>
