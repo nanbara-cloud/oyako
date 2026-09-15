@@ -51,6 +51,9 @@
   .counts td,.counts th{padding:4px 12px}
   .msg{margin-top:12px;padding:10px 12px;border-left:3px solid #a8a7a3;background:#fff;font-size:12.5px}
   .msg.bad{border-left-color:#a86b5b}
+  textarea.tsv{width:100%;height:190px;margin-top:8px;padding:8px;
+    border:1px solid var(--line);font-family:"Meiryo","メイリオ",sans-serif;
+    font-size:12px;white-space:pre;overflow:auto;background:#fff;color:var(--ink)}
   @media print{
     body{background:#fff}
     .panel.settings,.btns,.sub{display:none}
@@ -92,6 +95,7 @@
       <div class="btns">
         <button onclick="run()">組み合わせを作る</button>
         <button class="ghost" onclick="again()">別の組み合わせ</button>
+        <button class="ghost" onclick="downloadXlsx()">Excelでダウンロード</button>
         <button class="ghost" onclick="copyTsv()">Excelにコピー</button>
         <button class="ghost" onclick="print()">印刷</button>
       </div>
@@ -368,10 +372,226 @@ function copyTsv(){
   });
   const cs = tt.closeEnd - tt.close;
   lines.push(`${toHM(cs)}～${toHM(tt.closeEnd)}\t前半 6年生－父母 ／ 後半 6年生－コーチ`);
-  navigator.clipboard.writeText(lines.join("\n")).then(() => {
+  const text = lines.join("\n");
+  const done = () => {
     const m = document.getElementById("msg");
-    m.className = "msg"; m.textContent = "コピーしました。Excelのセルを選んで貼り付けてください。";
+    m.className = "msg";
+    m.textContent = "コピーしました。Excelのセルを選んで貼り付けてください。";
+  };
+  const fallback = () => {
+    document.getElementById("msg").innerHTML =
+      '<div class="msg">下の枠の中をクリックしてCtrl＋C（MacはCommand＋C）でコピーし、'
+      + 'Excelのセルを選んで貼り付けてください。</div>';
+    const ta = document.createElement("textarea");
+    ta.className = "tsv"; ta.value = text; ta.readOnly = true;
+    document.getElementById("msg").appendChild(ta);
+    ta.focus(); ta.select();
+  };
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(done).catch(fallback);
+  } else {
+    fallback();
+  }
+}
+
+/* ===== Excelファイル（.xlsx）を作って保存する ===== */
+const CRC_T = (() => { const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = c&1 ? 0xEDB88320^(c>>>1) : c>>>1;
+    t[n]=c>>>0; } return t; })();
+function crc32(buf){ let c = 0xFFFFFFFF;
+  for(let i=0;i<buf.length;i++) c = CRC_T[(c ^ buf[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF) >>> 0; }
+const enc = s => new TextEncoder().encode(s);
+
+function zip(files){                     // 無圧縮ZIP（xlsxの中身）
+  const parts = [], dir = []; let off = 0;
+  const u16 = v => [v & 255, (v>>>8) & 255];
+  const u32 = v => [v & 255, (v>>>8) & 255, (v>>>16) & 255, (v>>>24) & 255];
+  for(const f of files){
+    const nm = enc(f.name), data = enc(f.data), crc = crc32(data);
+    const head = [].concat([80,75,3,4], u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(crc), u32(data.length), u32(data.length), u16(nm.length), u16(0));
+    parts.push(new Uint8Array(head), nm, data);
+    dir.push({nm, crc, len:data.length, off});
+    off += head.length + nm.length + data.length;
+  }
+  const cd = [];
+  for(const d of dir){
+    const h = [].concat([80,75,1,2], u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+      u32(d.crc), u32(d.len), u32(d.len), u16(d.nm.length), u16(0), u16(0), u16(0),
+      u16(0), u32(0), u32(d.off));
+    cd.push(new Uint8Array(h), d.nm);
+  }
+  const cdLen = cd.reduce((s,a)=>s+a.length, 0);
+  const end = new Uint8Array([].concat([80,75,5,6], u16(0), u16(0),
+    u16(dir.length), u16(dir.length), u32(cdLen), u32(off), u16(0)));
+  const all = parts.concat(cd, [end]);
+  const total = all.reduce((s,a)=>s+a.length, 0);
+  const buf = new Uint8Array(total); let p = 0;
+  for(const a of all){ buf.set(a, p); p += a.length; }
+  return buf;
+}
+
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const colL = n => { let s = ""; while(n > 0){ const m = (n-1) % 26;
+  s = String.fromCharCode(65+m) + s; n = (n-1-m)/26; } return s; };
+
+const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="4">
+<font><sz val="11"/><name val="Meiryo"/><color rgb="FF333331"/></font>
+<font><b/><sz val="11"/><name val="Meiryo"/><color rgb="FF333331"/></font>
+<font><b/><sz val="14"/><name val="Meiryo"/><color rgb="FF404040"/></font>
+<font><sz val="9"/><name val="Meiryo"/><color rgb="FF6F6E6B"/></font>
+</fonts>
+<fills count="7">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF7F7F6"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEEF2EE"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF0ECE3"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F1"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="2">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF9A9A97"/></left><right style="thin"><color rgb="FF9A9A97"/></right><top style="thin"><color rgb="FF9A9A97"/></top><bottom style="thin"><color rgb="FF9A9A97"/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="9">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`;
+
+function sheetXml(){
+  const {tt, rounds, teams, pools} = LAST;
+  const rows = [], merges = [];
+  let r = 0;
+  const cell = (row, col, val, st) => {
+    row.push(typeof val === "number"
+      ? `<c r="${colL(col)}${row.__r}" s="${st}"><v>${val}</v></c>`
+      : `<c r="${colL(col)}${row.__r}" s="${st}" t="inlineStr"><is><t xml:space="preserve">${esc(val)}</t></is></c>`);
+  };
+  const newRow = (h) => { r++; const a = []; a.__r = r; a.__h = h; rows.push(a); return a; };
+
+  let row = newRow(24); cell(row, 1, "親子サッカー タイムテーブル", 1);
+  merges.push(`A${r}:J${r}`);
+  row = newRow(18);
+  cell(row, 1, `${toHM(tt.slots[0].start)}開始 ／ ${toHM(tt.closeEnd)}終了 ／ 全${tt.R}試合＋締めの試合`
+       + `　　父母戦 ${pools.oyaAB + pools.oyaC}試合`, 8);
+  merges.push(`A${r}:J${r}`);
+  newRow(8);
+
+  row = newRow(26);
+  cell(row, 1, "時間", 2);
+  [["Aコート",2],["Bコート",5],["Cコート",8]].forEach(([t,c]) => {
+    cell(row, c, t, 2); cell(row, c+1, "", 2); cell(row, c+2, "", 2);
+    merges.push(`${colL(c)}${r}:${colL(c+2)}${r}`);
   });
+
+  rounds.forEach((rd, i) => {
+    const s = tt.slots[i];
+    row = newRow(24);
+    cell(row, 1, `${toHM(s.start)}～${toHM(s.end)}`, 3);
+    rd.forEach((m, k) => {
+      const c = 2 + k*3;
+      const st = m && m.includes("父母") ? 5 : 4;
+      cell(row, c, m ? m[0] : "", st);
+      cell(row, c+1, m ? "－" : "", 4);
+      cell(row, c+2, m ? m[1] : "", st);
+    });
+    if(i+1 === tt.after){
+      row = newRow(26);
+      cell(row, 1, `${toHM(s.end)}～${toHM(s.end + tt.lunch)}`, 3);
+      cell(row, 2, "昼休憩　※出店でのお買い物・お昼ごはんの時間です", 6);
+      for(let c=3;c<=10;c++) cell(row, c, "", 6);
+      merges.push(`B${r}:J${r}`);
+    }
+  });
+
+  const cs = tt.closeEnd - tt.close;
+  row = newRow(28);
+  cell(row, 1, `${toHM(cs)}～${toHM(tt.closeEnd)}`, 3);
+  cell(row, 2, `前半${Math.floor(tt.close/2)}分　6年生－父母　　／　　後半${Math.ceil(tt.close/2)}分　6年生－コーチ`, 7);
+  for(let c=3;c<=10;c++) cell(row, c, "", 7);
+  merges.push(`B${r}:J${r}`);
+
+  row = newRow(18);
+  cell(row, 7, "当日変更があるかもしれません", 8);
+
+  newRow(8);
+  row = newRow(24);
+  cell(row, 1, "チーム", 2); cell(row, 2, "試合数", 2); cell(row, 3, "うち父母戦", 2);
+  const all = rounds.flat().filter(Boolean);
+  teams.map(t => t.name).concat("父母").forEach(t => {
+    const n = all.filter(m => m.includes(t)).length;
+    const o = all.filter(m => m.includes(t) && m.includes("父母")).length;
+    row = newRow(20);
+    cell(row, 1, t, 3); cell(row, 2, n, 4);
+    cell(row, 3, t === "父母" ? "-" : o, 4);
+  });
+
+  const body = rows.map(a => a.length
+    ? `<row r="${a.__r}" ht="${a.__h}" customHeight="1">${a.join("")}</row>`
+    : `<row r="${a.__r}" ht="${a.__h}" customHeight="1"/>`).join("");
+  const cols = '<cols><col min="1" max="1" width="16" customWidth="1"/>'
+    + '<col min="2" max="2" width="11" customWidth="1"/><col min="3" max="3" width="4" customWidth="1"/>'
+    + '<col min="4" max="5" width="11" customWidth="1"/><col min="6" max="6" width="4" customWidth="1"/>'
+    + '<col min="7" max="8" width="11" customWidth="1"/><col min="9" max="9" width="4" customWidth="1"/>'
+    + '<col min="10" max="10" width="11" customWidth="1"/></cols>';
+  const mg = `<mergeCells count="${merges.length}">`
+    + merges.map(m => `<mergeCell ref="${m}"/>`).join("") + "</mergeCells>";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>
+${cols}<sheetData>${body}</sheetData>${mg}</worksheet>`;
+}
+
+function downloadXlsx(){
+  if(!LAST) return;
+  const files = [
+    {name:"[Content_Types].xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`},
+    {name:"_rels/.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`},
+    {name:"xl/workbook.xml", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="タイムテーブル" sheetId="1" r:id="rId1"/></sheets></workbook>`},
+    {name:"xl/_rels/workbook.xml.rels", data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`},
+    {name:"xl/styles.xml", data:STYLES},
+    {name:"xl/worksheets/sheet1.xml", data:sheetXml()}
+  ];
+  const buf = zip(files);
+  if(typeof window === "undefined") return buf;
+  const blob = new Blob([buf], {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "親子サッカー_タイムテーブル.xlsx";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  const m = document.getElementById("msg");
+  m.className = "msg"; m.textContent = "Excelファイルを保存しました。";
 }
 
 run();
