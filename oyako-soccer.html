@@ -92,6 +92,7 @@
       <div class="fld"><label>A・Bコートは何年生以上</label><input id="abFrom" value="3"></div>
       <div class="fld"><label>父母の同時試合数</label><input id="oyaPar" value="2"></div>
       <div class="fld"><label>午前で終わる学年（0＝なし）</label><input id="amEnd" value="1"></div>
+      <div class="fld"><label>連続出場の上限（試合）</label><input id="maxRun" value="3"></div>
 
       <div class="btns">
         <button onclick="run()">組み合わせを作る</button>
@@ -224,10 +225,11 @@ function buildPools(teams, R, oyaRounds, oyaPar, caps){
 }
 
 /* ---------- ラウンドに割り当て ---------- */
-function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx){
+function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx, maxRun){
   const {abPool, cPool, hasC} = pools;
   const ab = shuffle(abPool.slice()), c = shuffle(cPool.slice());
-  const last = {}, rounds = [];
+  const last = {}, streak = {}, rounds = [];
+  const allNames = pools.high.concat(pools.low).map(t => t.name);
   const perCourt = hasC ? 2 : 3;
 
   for(let r=0;r<slots.length;r++){
@@ -240,6 +242,7 @@ function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx){
         if(m.some(t => t !== "父母" && used.has(t))) return false;
         if(m.includes("父母") && (!allowOya || oyaCnt >= oyaPar)) return false;
         if(r >= lunchIdx && m.some(t => amOnly.has(t))) return false;
+        if(m.some(t => t !== "父母" && (streak[t]||0) >= maxRun)) return false;
         return true;
       });
       if(!cands.length) return null;
@@ -267,17 +270,18 @@ function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx){
     }
     if(row.some(m => m === null)) return null;
     used.forEach(t => last[t] = r);
+    allNames.forEach(t => streak[t] = used.has(t) ? (streak[t]||0)+1 : 0);
     rounds.push(row);
   }
   return (ab.length || c.length) ? null : rounds;
 }
 
-function quality(rounds, teams){
+function quality(rounds, teams, maxRun){
   let pen = 0;
   for(const t of teams){
     const play = rounds.map(rd => rd.some(m => m && m.includes(t.name)));
     let run=0, mx=0; for(const p of play){ run = p?run+1:0; mx = Math.max(mx,run); }
-    pen += Math.max(0, mx-3)**2 * 5;
+    pen += Math.max(0, mx-(maxRun||3))**2 * 5;
     run=0; mx=0; for(const p of play){ run = p?0:run+1; mx = Math.max(mx,run); }
     pen += Math.max(0, mx-3)**2 * 5;
   }
@@ -305,29 +309,36 @@ function run(keepSeed){
   const oyaStart = toMin(val("oyaFrom"));
   const oyaPar = Math.max(1, num("oyaPar"));
   const oyaRounds = tt.slots.filter(s => s.start >= oyaStart).length;
+  const wantRun = Math.max(1, num("maxRun") || 3);
   const amEnd = num("amEnd") || 0;
   const amOnly = new Set(teams.filter(t => t.grade <= amEnd).map(t => t.name));
   const caps = {};
   if(amOnly.size){
     const per = Math.max(1, Math.floor((tt.after - 1) / amOnly.size) + 1);
-    amOnly.forEach(n => caps[n] = Math.min(per, tt.after - 1));
+    // 連続出場の上限に合わせて、午前に入れられる最大試合数を出す
+    const fit = tt.after - Math.floor(tt.after / (wantRun + 1));
+    amOnly.forEach(n => caps[n] = Math.max(1, Math.min(per, tt.after - 1, fit)));
   }
   const pools = buildPools(teams, tt.R, oyaRounds, oyaPar, caps);
 
-  let best = null, bq = Infinity;
-  for(let i=0;i<600;i++){
-    const rs = assign(tt.slots, JSON.parse(JSON.stringify(pools)), oyaStart, oyaPar,
-                      amOnly, amOnly.size ? tt.after : 99);
-    if(!rs) continue;
-    const q = quality(rs, teams);
-    if(q < bq){ best = rs; bq = q; if(q === 0) break; }
+  let best = null, bq = Infinity, usedRun = wantRun;
+  for(let run = wantRun; run <= wantRun + 3 && !best; run++){
+    for(let i=0;i<700;i++){
+      const rs = assign(tt.slots, JSON.parse(JSON.stringify(pools)), oyaStart, oyaPar,
+                        amOnly, amOnly.size ? tt.after : 99, run);
+      if(!rs) continue;
+      const q = quality(rs, teams, run);
+      if(q < bq){ best = rs; bq = q; usedRun = run; if(q === 0) break; }
+    }
   }
   if(!best){ msg.className="msg bad";
     msg.textContent="この条件では組み合わせが作れませんでした。父母戦の開始時刻を早めるか、同時試合数を増やしてみてください。"; return; }
 
-  LAST = {tt, rounds:best, teams, pools, amOnly};
+  LAST = {tt, rounds:best, teams, pools, amOnly, usedRun};
   render();
-  if(bq > 0) msg.textContent = "出番の間隔に少し偏りがあります。「別の組み合わせ」で作り直せます。";
+  if(usedRun > wantRun){
+    msg.textContent = `連続${wantRun}試合では組めなかったので、上限${usedRun}試合で作りました。`;
+  }
   if(amOnly.size){
     const late = best.some((rd,i) => i >= tt.after && rd.some(m => m && m.some(t => amOnly.has(t))));
     if(late){ msg.className = "msg bad";
