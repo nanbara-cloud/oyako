@@ -91,6 +91,7 @@
       <h2 style="margin-top:18px">コート割</h2>
       <div class="fld"><label>A・Bコートは何年生以上</label><input id="abFrom" value="3"></div>
       <div class="fld"><label>父母の同時試合数</label><input id="oyaPar" value="2"></div>
+      <div class="fld"><label>午前で終わる学年（0＝なし）</label><input id="amEnd" value="1"></div>
 
       <div class="btns">
         <button onclick="run()">組み合わせを作る</button>
@@ -159,7 +160,7 @@ function buildSlots(){
 }
 
 /* ---------- 対戦カードの元リスト ---------- */
-function buildPools(teams, R, oyaRounds, oyaPar){
+function buildPools(teams, R, oyaRounds, oyaPar, caps){
   const abFrom = num("abFrom");
   const high = teams.filter(t => t.grade >= abFrom);
   const low  = teams.filter(t => t.grade <  abFrom);
@@ -181,12 +182,14 @@ function buildPools(teams, R, oyaRounds, oyaPar){
     return p;
   };
   const cnt = {};
+  const ok = p => p.every(t => (cnt[t]||0) < (caps[t] ?? 99));
   const fill = (base, n) => {                 // 試合数が偏らないように選ぶ
     const out = []; let used = new Set();
     if(!base.length) return out;
     while(out.length < n){
-      let cands = base.filter(p => !used.has(key(p[0],p[1])));
-      if(!cands.length){ used = new Set(); cands = base; }
+      let cands = base.filter(p => ok(p) && !used.has(key(p[0],p[1])));
+      if(!cands.length){ used = new Set(); cands = base.filter(ok); }
+      if(!cands.length){ cands = base; }
       cands.sort((a,b) => ((cnt[a[0]]||0)+(cnt[a[1]]||0)) - ((cnt[b[0]]||0)+(cnt[b[1]]||0))
                            + (rnd()-.5)*0.02);
       const p = cands[0];
@@ -199,7 +202,9 @@ function buildPools(teams, R, oyaRounds, oyaPar){
   const spread = (list, n) => {               // 父母戦を各チームに散らす
     const out = [];
     for(let i=0;i<n;i++){
-      const l = list.slice().sort((a,b) => (cnt[a.name]||0)-(cnt[b.name]||0) + (rnd()-.5)*0.02);
+      let l = list.filter(t => (cnt[t.name]||0) < (caps[t.name] ?? 99));
+      if(!l.length) l = list.slice();
+      l.sort((a,b) => (cnt[a.name]||0)-(cnt[b.name]||0) + (rnd()-.5)*0.02);
       out.push([l[0].name, "父母"]);
       cnt[l[0].name] = (cnt[l[0].name]||0)+1;
     }
@@ -219,7 +224,7 @@ function buildPools(teams, R, oyaRounds, oyaPar){
 }
 
 /* ---------- ラウンドに割り当て ---------- */
-function assign(slots, pools, oyaStart, oyaPar){
+function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx){
   const {abPool, cPool, hasC} = pools;
   const ab = shuffle(abPool.slice()), c = shuffle(cPool.slice());
   const last = {}, rounds = [];
@@ -234,6 +239,7 @@ function assign(slots, pools, oyaStart, oyaPar){
       const cands = pool.filter(m => {
         if(m.some(t => t !== "父母" && used.has(t))) return false;
         if(m.includes("父母") && (!allowOya || oyaCnt >= oyaPar)) return false;
+        if(r >= lunchIdx && m.some(t => amOnly.has(t))) return false;
         return true;
       });
       if(!cands.length) return null;
@@ -241,6 +247,7 @@ function assign(slots, pools, oyaStart, oyaPar){
       function score(m){
         let s = 0;
         if(m.includes("父母")) s -= (oyaLeft >= left ? 60 : 12);
+        if(m.some(t => amOnly.has(t))) s -= 45;
         for(const t of m) if(t !== "父母") s -= (r - (last[t] ?? -3)) * 3;
         return s + rnd();
       }
@@ -298,11 +305,19 @@ function run(keepSeed){
   const oyaStart = toMin(val("oyaFrom"));
   const oyaPar = Math.max(1, num("oyaPar"));
   const oyaRounds = tt.slots.filter(s => s.start >= oyaStart).length;
-  const pools = buildPools(teams, tt.R, oyaRounds, oyaPar);
+  const amEnd = num("amEnd") || 0;
+  const amOnly = new Set(teams.filter(t => t.grade <= amEnd).map(t => t.name));
+  const caps = {};
+  if(amOnly.size){
+    const per = Math.max(1, Math.floor((tt.after - 1) / amOnly.size) + 1);
+    amOnly.forEach(n => caps[n] = Math.min(per, tt.after - 1));
+  }
+  const pools = buildPools(teams, tt.R, oyaRounds, oyaPar, caps);
 
   let best = null, bq = Infinity;
   for(let i=0;i<600;i++){
-    const rs = assign(tt.slots, JSON.parse(JSON.stringify(pools)), oyaStart, oyaPar);
+    const rs = assign(tt.slots, JSON.parse(JSON.stringify(pools)), oyaStart, oyaPar,
+                      amOnly, amOnly.size ? tt.after : 99);
     if(!rs) continue;
     const q = quality(rs, teams);
     if(q < bq){ best = rs; bq = q; if(q === 0) break; }
@@ -310,9 +325,14 @@ function run(keepSeed){
   if(!best){ msg.className="msg bad";
     msg.textContent="この条件では組み合わせが作れませんでした。父母戦の開始時刻を早めるか、同時試合数を増やしてみてください。"; return; }
 
-  LAST = {tt, rounds:best, teams, pools};
+  LAST = {tt, rounds:best, teams, pools, amOnly};
   render();
   if(bq > 0) msg.textContent = "出番の間隔に少し偏りがあります。「別の組み合わせ」で作り直せます。";
+  if(amOnly.size){
+    const late = best.some((rd,i) => i >= tt.after && rd.some(m => m && m.some(t => amOnly.has(t))));
+    if(late){ msg.className = "msg bad";
+      msg.textContent = "午前だけに収まりませんでした。1試合の時間を短くするか、昼休憩を遅らせてください。"; }
+  }
 }
 
 function render(){
@@ -356,7 +376,9 @@ function render(){
   document.getElementById("meta").innerHTML =
     `<span>全${tt.R}試合＋締めの試合</span><span>${toHM(tt.slots[0].start)}開始 / `
     + `${toHM(tt.closeEnd)}終了</span><span>父母戦 ${pools.oyaAB + pools.oyaC}試合</span>`
-    + `<span>${hasC ? "Cコート＝低学年" : "3コートとも混合"}</span>`;
+    + `<span>${hasC ? "Cコート＝低学年" : "3コートとも混合"}</span>`
+    + (LAST.amOnly && LAST.amOnly.size
+       ? `<span>${[...LAST.amOnly].join("・")}は午前で終了</span>` : "");
 }
 
 function copyTsv(){
