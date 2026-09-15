@@ -92,7 +92,8 @@
       <div class="fld"><label>A・Bコートは何年生以上</label><input id="abFrom" value="3"></div>
       <div class="fld"><label>父母の同時試合数</label><input id="oyaPar" value="2"></div>
       <div class="fld"><label>午前で終わる学年（0＝なし）</label><input id="amEnd" value="1"></div>
-      <div class="fld"><label>連続出場の上限（試合）</label><input id="maxRun" value="3"></div>
+      <div class="fld"><label>連続出場の上限（試合）</label><input id="maxRun" value="2"></div>
+      <div class="fld"><label>2年生をA/Bに出す回数</label><input id="swapN" value="2"></div>
 
       <div class="btns">
         <button onclick="run()">組み合わせを作る</button>
@@ -191,8 +192,11 @@ function buildPools(teams, R, oyaRounds, oyaPar, caps){
       let cands = base.filter(p => ok(p) && !used.has(key(p[0],p[1])));
       if(!cands.length){ used = new Set(); cands = base.filter(ok); }
       if(!cands.length){ cands = base; }
-      cands.sort((a,b) => ((cnt[a[0]]||0)+(cnt[a[1]]||0)) - ((cnt[b[0]]||0)+(cnt[b[1]]||0))
-                           + (rnd()-.5)*0.02);
+      const short = p => p.reduce((v,t) =>
+        v + (caps[t] !== undefined && (cnt[t]||0) < caps[t] ? 1 : 0), 0);
+      cands.sort((a,b) => (((cnt[a[0]]||0)+(cnt[a[1]]||0)) - short(a)*2)
+                        - (((cnt[b[0]]||0)+(cnt[b[1]]||0)) - short(b)*2)
+                        + (rnd()-.5)*0.02);
       const p = cands[0];
       used.add(key(p[0],p[1]));
       out.push(p.slice());
@@ -215,9 +219,13 @@ function buildPools(teams, R, oyaRounds, oyaPar, caps){
   const abOya = spread(high, oyaAB);
   const abPool = abOya.concat(fill(pairs(high), abSlots - oyaAB));
   let cBase = pairs(low);
-  if(hasC && cBase.length === 0){        // 下の学年が1チームだけのとき
-    const helper = high.slice().sort((a,b)=>a.grade-b.grade)[0];
-    cBase = [[low[0].name, helper.name]];
+  const needC = cSlots - oyaC;
+  if(hasC && cBase.length < needC){      // 同じカードの繰り返しを避けるため下の学年に近い相手を足す
+    const helpers = high.slice().sort((a,b) => a.grade - b.grade)
+                        .filter((t,i,arr) => t.grade === arr[0].grade);
+    const minG = Math.min(...low.map(t => t.grade));
+    low.filter(l => l.grade > minG)      // 一番下の学年は相手を広げない
+       .forEach(l => helpers.forEach(h => cBase.push([l.name, h.name])));
   }
   const cOya = hasC ? spread(low, oyaC) : [];
   const cPool = hasC ? cOya.concat(fill(cBase, cSlots - oyaC)) : [];
@@ -228,7 +236,7 @@ function buildPools(teams, R, oyaRounds, oyaPar, caps){
 function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx, maxRun){
   const {abPool, cPool, hasC} = pools;
   const ab = shuffle(abPool.slice()), c = shuffle(cPool.slice());
-  const last = {}, streak = {}, rounds = [];
+  const last = {}, streak = {}, lastPair = {}, rounds = [];
   const allNames = pools.high.concat(pools.low).map(t => t.name);
   const perCourt = hasC ? 2 : 3;
 
@@ -238,13 +246,16 @@ function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx, maxRun){
     const take = pool => {
       const left = slots.length - r;
       const oyaLeft = pool.filter(m => m.includes("父母")).length;
-      const cands = pool.filter(m => {
+      const base = pool.filter(m => {
         if(m.some(t => t !== "父母" && used.has(t))) return false;
         if(m.includes("父母") && (!allowOya || oyaCnt >= oyaPar)) return false;
         if(r >= lunchIdx && m.some(t => amOnly.has(t))) return false;
         if(m.some(t => t !== "父母" && (streak[t]||0) >= maxRun)) return false;
         return true;
       });
+      // 直前のラウンドと同じカードは避ける
+      let cands = base.filter(m => r - (lastPair[key(m[0],m[1])] ?? -9) >= 2);
+      if(!cands.length) cands = base;
       if(!cands.length) return null;
       cands.sort((x,y) => score(x) - score(y));
       function score(m){
@@ -258,6 +269,7 @@ function assign(slots, pools, oyaStart, oyaPar, amOnly, lunchIdx, maxRun){
       pool.splice(pool.indexOf(m), 1);
       m.forEach(t => { if(t !== "父母") used.add(t); });
       if(m.includes("父母")) oyaCnt++;
+      lastPair[key(m[0], m[1])] = r;
       return m;
     };
     const row = [];
@@ -287,9 +299,45 @@ function quality(rounds, teams, maxRun){
   }
   for(let i=0;i<rounds.length-1;i++){
     const a = new Set(rounds[i].filter(Boolean).map(m=>key(m[0],m[1])));
-    for(const m of rounds[i+1]) if(m && a.has(key(m[0],m[1]))) pen += 8;
+    for(const m of rounds[i+1]) if(m && a.has(key(m[0],m[1]))) pen += 40;
+    if(i+2 < rounds.length)
+      for(const m of rounds[i+2]) if(m && a.has(key(m[0],m[1]))) pen += 10;
   }
   return pen;
+}
+
+/* ---------- 低学年をA/Bに、代わりに3年生をCに ---------- */
+function applySwaps(rounds, teams, n){
+  const abFrom = num("abFrom");
+  const gr = {}; teams.forEach(t => gr[t.name] = t.grade);
+  const kids = m => m.filter(t => t !== "父母");
+  const cOk = m => m && kids(m).every(t => gr[t] >= 2) && kids(m).some(t => gr[t] < abFrom);
+  const abOk = m => m && kids(m).length > 0 && kids(m).every(t => gr[t] === abFrom);
+  const cntSwap = {}, cntC = {}, done = [];
+  for(let pass=0; pass<n; pass++){
+    let bR = -1, bK = -1, bS = -Infinity;
+    for(let r=0;r<rounds.length;r++){
+      if(done.includes(r) || !cOk(rounds[r][2])) continue;
+      for(const k of [0,1]){
+        if(!abOk(rounds[r][k])) continue;
+        let sc = rnd();
+        kids(rounds[r][2]).filter(t => gr[t] < abFrom)
+          .forEach(t => sc -= (cntSwap[t]||0) * 10);
+        kids(rounds[r][k]).forEach(t => sc -= (cntC[t]||0) * 10);
+        done.forEach(d => sc -= Math.max(0, 4 - Math.abs(d - r)) * 3);
+        if(sc > bS){ bS = sc; bR = r; bK = k; }
+      }
+    }
+    if(bR < 0) break;
+    const tmp = rounds[bR][bK];
+    rounds[bR][bK] = rounds[bR][2];
+    rounds[bR][2] = tmp;
+    kids(rounds[bR][bK]).filter(t => gr[t] < abFrom)
+      .forEach(t => cntSwap[t] = (cntSwap[t]||0) + 1);
+    kids(rounds[bR][2]).forEach(t => cntC[t] = (cntC[t]||0) + 1);
+    done.push(bR);
+  }
+  return done.length;
 }
 
 /* ---------- 実行 ---------- */
@@ -334,10 +382,14 @@ function run(keepSeed){
   if(!best){ msg.className="msg bad";
     msg.textContent="この条件では組み合わせが作れませんでした。父母戦の開始時刻を早めるか、同時試合数を増やしてみてください。"; return; }
 
-  LAST = {tt, rounds:best, teams, pools, amOnly, usedRun};
+  const wantSwap = Math.max(0, num("swapN") || 0);
+  const didSwap = (pools.hasC && wantSwap) ? applySwaps(best, teams, wantSwap) : 0;
+  LAST = {tt, rounds:best, teams, pools, amOnly, usedRun, didSwap, wantSwap};
   render();
   if(usedRun > wantRun){
     msg.textContent = `連続${wantRun}試合では組めなかったので、上限${usedRun}試合で作りました。`;
+  } else if(wantSwap && didSwap < wantSwap){
+    msg.textContent = `A/Bとの入れ替えは${didSwap}回までしかできませんでした。`;
   }
   if(amOnly.size){
     const late = best.some((rd,i) => i >= tt.after && rd.some(m => m && m.some(t => amOnly.has(t))));
@@ -389,7 +441,8 @@ function render(){
     + `${toHM(tt.closeEnd)}終了</span><span>父母戦 ${pools.oyaAB + pools.oyaC}試合</span>`
     + `<span>${hasC ? "Cコート＝低学年" : "3コートとも混合"}</span>`
     + (LAST.amOnly && LAST.amOnly.size
-       ? `<span>${[...LAST.amOnly].join("・")}は午前で終了</span>` : "");
+       ? `<span>${[...LAST.amOnly].join("・")}は午前で終了</span>` : "")
+    + (LAST.didSwap ? `<span>低学年がA/Bに出る回 ${LAST.didSwap}回</span>` : "");
 }
 
 function copyTsv(){
